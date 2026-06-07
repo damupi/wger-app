@@ -1,6 +1,7 @@
 import { MaterialIcons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import Swipeable from 'react-native-gesture-handler/Swipeable';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -166,10 +167,11 @@ function SetRow({ set, index, onUpdate, onDelete }: {
 
 // ── Exercise menu ─────────────────────────────────────────────────────────────
 
-function ExerciseMenuSheet({ exercise, onClose, onUpdateRestTimers }: {
+function ExerciseMenuSheet({ exercise, onClose, onUpdateRestTimers, onDeleteExercise }: {
   exercise: ExerciseBlock | null;
   onClose: () => void;
   onUpdateRestTimers: () => void;
+  onDeleteExercise: () => void;
 }) {
   return (
     <Modal visible={exercise !== null} transparent animationType="slide" onRequestClose={onClose}>
@@ -180,6 +182,10 @@ function ExerciseMenuSheet({ exercise, onClose, onUpdateRestTimers }: {
         <TouchableOpacity style={ms.row} onPress={() => { onClose(); onUpdateRestTimers(); }} activeOpacity={0.7}>
           <MaterialIcons name="timer" size={22} color="#2196F3" style={ms.rowIcon} />
           <Text style={ms.rowLabel}>Update rest timers</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={ms.row} onPress={() => { onClose(); onDeleteExercise(); }} activeOpacity={0.7}>
+          <MaterialIcons name="delete-outline" size={22} color="#f44336" style={ms.rowIcon} />
+          <Text style={[ms.rowLabel, { color: '#f44336' }]}>Delete exercise</Text>
         </TouchableOpacity>
         <TouchableOpacity style={ms.cancelBtn} onPress={onClose}>
           <Text style={ms.cancelText}>Cancel</Text>
@@ -450,6 +456,11 @@ export default function WorkoutScreen() {
     setExercises((prev) => prev.map((b) => ({ ...b, sets: b.sets.filter((s) => s.id !== id) })));
   }, []);
 
+  const handleDeleteExercise = useCallback(async (block: ExerciseBlock) => {
+    await Promise.all(block.sets.filter((s) => s.id != null).map((s) => deleteActiveSet(s.id!)));
+    setExercises((prev) => prev.filter((b) => b.exerciseId !== block.exerciseId));
+  }, []);
+
   const handleAddExercise = useCallback(async (info: ExerciseInfo) => {
     const name = getEnglishName(info);
     setShowAddExercise(false);
@@ -583,7 +594,7 @@ export default function WorkoutScreen() {
             <View style={styles.exerciseHeader}>
               <Text style={styles.exerciseName}>{block.exerciseName}</Text>
               <TouchableOpacity onPress={() => setMenuExercise(block)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <MaterialIcons name="more-horiz" size={22} color="#2196F3" />
+                <MaterialIcons name="more-horiz" size={22} color="#4CAF50" />
               </TouchableOpacity>
             </View>
             <View style={sr.row}>
@@ -595,7 +606,17 @@ export default function WorkoutScreen() {
             </View>
             {block.sets.map((set, i) => (
               <View key={set.id}>
-                <SetRow set={set} index={i} onUpdate={handleUpdateSet} onDelete={handleDeleteSet} />
+                <Swipeable
+                  renderRightActions={() => (
+                    <TouchableOpacity style={sr.deleteAction} onPress={() => handleDeleteSet(set.id!)}>
+                      <MaterialIcons name="delete" size={20} color="#fff" />
+                    </TouchableOpacity>
+                  )}
+                  friction={2}
+                  overshootRight={false}
+                >
+                  <SetRow set={set} index={i} onUpdate={handleUpdateSet} onDelete={handleDeleteSet} />
+                </Swipeable>
                 {restTimer?.setId === set.id && (
                   <RestTimerBar startedAt={restTimer.startedAt} totalSeconds={restTimer.totalSeconds} onFinish={() => setRestTimer(null)} />
                 )}
@@ -610,7 +631,12 @@ export default function WorkoutScreen() {
       />
 
       <AddExerciseModal visible={showAddExercise} onClose={() => setShowAddExercise(false)} onSelect={handleAddExercise} />
-      <ExerciseMenuSheet exercise={menuExercise} onClose={() => setMenuExercise(null)} onUpdateRestTimers={() => setRestEditExercise(menuExercise)} />
+      <ExerciseMenuSheet
+        exercise={menuExercise}
+        onClose={() => setMenuExercise(null)}
+        onUpdateRestTimers={() => setRestEditExercise(menuExercise)}
+        onDeleteExercise={() => menuExercise && handleDeleteExercise(menuExercise)}
+      />
       <RestTimerModal
         exercise={restEditExercise}
         currentSeconds={restEditExercise ? (exerciseRestTimes.get(restEditExercise.exerciseId) ?? REST_SECONDS) : REST_SECONDS}
@@ -641,6 +667,7 @@ const sr = StyleSheet.create({
   inputDone: { backgroundColor: '#1a2a3a', color: '#2196F3' },
   check: { width: 32, height: 32, borderRadius: 6, borderWidth: 2, borderColor: '#444', justifyContent: 'center', alignItems: 'center', marginHorizontal: 2 },
   checkDone: { backgroundColor: '#2196F3', borderColor: '#2196F3' },
+  deleteAction: { backgroundColor: '#f44336', justifyContent: 'center', alignItems: 'center', width: 60, borderRadius: 6, marginLeft: 6, marginVertical: 2 },
 });
 
 const styles = StyleSheet.create({
