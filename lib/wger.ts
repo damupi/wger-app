@@ -63,7 +63,27 @@ export interface SlotEntry {
   exercise: number;
   order: number;
   comment: string;
+  repetition_unit: number;
+  weight_unit: number;
 }
+
+export interface SlotEntryConfig {
+  sets: number;
+  reps: number;
+  weight: number;
+}
+
+// repetition_unit values from /api/v2/setting-repetitionunit/
+export const REP_UNIT_LABEL: Record<number, string> = {
+  1: 'REPS',
+  2: 'FAIL',
+  3: 'SECS',
+  4: 'MINS',
+  5: 'MILES',
+  6: 'KM',
+  7: 'MAX',
+  8: 'MTR',
+};
 
 export interface WorkoutSession {
   id: number;
@@ -145,6 +165,38 @@ export async function fetchDaySlots(dayId: number): Promise<Slot[]> {
 export async function fetchSlotEntries(slotId: number): Promise<SlotEntry[]> {
   const data = await wgerFetch<Paginated<SlotEntry>>(`/api/v2/slot-entry/?slot=${slotId}&limit=100`);
   return data.results.sort((a, b) => a.order - b.order);
+}
+
+export async function fetchExerciseConfigs(): Promise<Map<number, SlotEntryConfig>> {
+  // All three config endpoints ignore query filters — fetch all and filter client-side.
+  interface RawConfig { id: number; slot_entry: number; iteration: number; value: string | number; }
+  const [setsData, repsData, weightData] = await Promise.all([
+    fetchAllPages<RawConfig>('/api/v2/sets-config/?limit=100'),
+    fetchAllPages<RawConfig>('/api/v2/repetitions-config/?limit=100'),
+    fetchAllPages<RawConfig>('/api/v2/weight-config/?limit=100'),
+  ]);
+
+  const setsLookup = new Map<number, number>();
+  const repsLookup = new Map<number, number>();
+  const weightLookup = new Map<number, number>();
+  for (const c of setsData) if (c.iteration === 1) setsLookup.set(c.slot_entry, Number(c.value));
+  for (const c of repsData) if (c.iteration === 1) repsLookup.set(c.slot_entry, Number(c.value));
+  for (const c of weightData) if (c.iteration === 1) weightLookup.set(c.slot_entry, Number(c.value));
+
+  const allIds = new Set([
+    ...setsData.map((c) => c.slot_entry),
+    ...repsData.map((c) => c.slot_entry),
+    ...weightData.map((c) => c.slot_entry),
+  ]);
+  const map = new Map<number, SlotEntryConfig>();
+  for (const id of allIds) {
+    map.set(id, {
+      sets: setsLookup.get(id) ?? 1,
+      reps: repsLookup.get(id) ?? 0,
+      weight: weightLookup.get(id) ?? 0,
+    });
+  }
+  return map;
 }
 
 export async function fetchSessions(): Promise<WorkoutSession[]> {

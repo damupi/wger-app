@@ -22,10 +22,12 @@ import {
   fetchAllExercises,
   fetchDay,
   fetchDaySlots,
+  fetchExerciseConfigs,
   fetchExerciseInfo,
   fetchRoutines,
   fetchSlotEntries,
   getEnglishName,
+  REP_UNIT_LABEL,
   createWorkoutLog,
   createSession,
 } from '@/lib/wger';
@@ -44,6 +46,9 @@ interface ExercisePreview {
   category: string;
   setCount: number;
   slotOrder: number;
+  defaultReps: number;
+  defaultWeight: number;
+  repUnit: number;
 }
 
 interface ExerciseBlock {
@@ -51,6 +56,7 @@ interface ExerciseBlock {
   exerciseId: number;
   exerciseName: string;
   sets: ActiveSet[];
+  repUnit: number;
 }
 
 // ── Timer ─────────────────────────────────────────────────────────────────────
@@ -335,26 +341,46 @@ export default function WorkoutScreen() {
       );
 
       const uniqueIds = [...new Set(flat.map((e) => e.exercise))];
-      const infos = await Promise.all(uniqueIds.map((id) => fetchExerciseInfo(id)));
+      const [infos, configMap] = await Promise.all([
+        Promise.all(uniqueIds.map((id) => fetchExerciseInfo(id))),
+        fetchExerciseConfigs(),
+      ]);
       const infoMap = new Map<number, ExerciseInfo>(infos.map((info) => [info.id, info]));
 
-      const byExercise = new Map<number, { name: string; category: string; count: number; minOrder: number }>();
+      const byExercise = new Map<number, { name: string; category: string; sets: number; reps: number; weight: number; repUnit: number; minOrder: number }>();
       for (const e of flat) {
         const info = infoMap.get(e.exercise);
         const name = info ? getEnglishName(info) : `Exercise #${e.exercise}`;
         const category = info?.category?.name ?? '';
+        const config = configMap.get(e.id);
+        const entrySets = config?.sets ?? 1;
         const existing = byExercise.get(e.exercise);
         if (existing) {
-          existing.count++;
-          if (e.slotOrder < existing.minOrder) existing.minOrder = e.slotOrder;
+          existing.sets += entrySets;
         } else {
-          byExercise.set(e.exercise, { name, category, count: 1, minOrder: e.slotOrder });
+          byExercise.set(e.exercise, {
+            name, category,
+            sets: entrySets,
+            reps: config?.reps ?? 0,
+            weight: config?.weight ?? 0,
+            repUnit: e.repetition_unit ?? 1,
+            minOrder: e.slotOrder,
+          });
         }
       }
 
       setPreview(
         Array.from(byExercise.entries())
-          .map(([id, v]) => ({ exerciseId: id, exerciseName: v.name, category: v.category, setCount: v.count, slotOrder: v.minOrder }))
+          .map(([id, v]) => ({
+            exerciseId: id,
+            exerciseName: v.name,
+            category: v.category,
+            setCount: v.sets,
+            slotOrder: v.minOrder,
+            defaultReps: v.reps,
+            defaultWeight: v.weight,
+            repUnit: v.repUnit,
+          }))
           .sort((a, b) => a.slotOrder - b.slotOrder)
       );
     } finally {
@@ -371,15 +397,26 @@ export default function WorkoutScreen() {
       const flat = allEntries.flatMap((list, i) =>
         list.map((e) => ({ ...e, slotOrder: slots[i].order * 100 + e.order }))
       );
+      const configMap = await fetchExerciseConfigs();
 
       const blocks: ExerciseBlock[] = [];
       for (const e of flat) {
+        const config = configMap.get(e.id);
+        const numSets = config?.sets ?? 1;
+        const defaultReps = config?.reps ?? 0;
+        const defaultWeight = config?.weight ?? 0;
+        const repUnit = e.repetition_unit ?? 1;
         const name = preview.find((p) => p.exerciseId === e.exercise)?.exerciseName ?? `Exercise #${e.exercise}`;
-        const setId = await insertActiveSet({ exerciseId: e.exercise, exerciseName: name, slotOrder: e.slotOrder, reps: 0, weight: 0, confirmed: false });
-        const row: ActiveSet = { id: setId, exerciseId: e.exercise, exerciseName: name, slotOrder: e.slotOrder, reps: 0, weight: 0, confirmed: false };
+
+        const newSets: ActiveSet[] = [];
+        for (let i = 0; i < numSets; i++) {
+          const setId = await insertActiveSet({ exerciseId: e.exercise, exerciseName: name, slotOrder: e.slotOrder, reps: defaultReps, weight: defaultWeight, confirmed: false });
+          newSets.push({ id: setId, exerciseId: e.exercise, exerciseName: name, slotOrder: e.slotOrder, reps: defaultReps, weight: defaultWeight, confirmed: false });
+        }
+
         const existing = blocks.find((b) => b.exerciseId === e.exercise);
-        if (existing) { existing.sets.push(row); }
-        else { blocks.push({ slotOrder: e.slotOrder, exerciseId: e.exercise, exerciseName: name, sets: [row] }); }
+        if (existing) { existing.sets.push(...newSets); }
+        else { blocks.push({ slotOrder: e.slotOrder, exerciseId: e.exercise, exerciseName: name, repUnit, sets: newSets }); }
       }
       setExercises(blocks.sort((a, b) => a.slotOrder - b.slotOrder));
       setStarted(true);
@@ -485,14 +522,18 @@ export default function WorkoutScreen() {
         ) : (
           <>
             <ScrollView contentContainerStyle={styles.previewContent}>
-              {preview.map((ex) => (
-                <View key={ex.exerciseId} style={styles.previewRow}>
-                  <View style={styles.previewMeta}>
-                    <Text style={styles.previewName}>{ex.setCount} × {ex.exerciseName}</Text>
-                    {ex.category ? <Text style={styles.previewCategory}>{ex.category}</Text> : null}
+              {preview.map((ex) => {
+                const unitLabel = (REP_UNIT_LABEL[ex.repUnit] ?? 'REPS').toLowerCase();
+                const detail = `${ex.setCount} sets × ${ex.defaultReps} ${unitLabel}${ex.defaultWeight > 0 ? ` @ ${ex.defaultWeight} kg` : ''}`;
+                return (
+                  <View key={ex.exerciseId} style={styles.previewRow}>
+                    <View style={styles.previewMeta}>
+                      <Text style={styles.previewName}>{ex.exerciseName}</Text>
+                      <Text style={styles.previewCategory}>{detail}</Text>
+                    </View>
                   </View>
-                </View>
-              ))}
+                );
+              })}
             </ScrollView>
             <View style={styles.startContainer}>
               <TouchableOpacity style={styles.startBtn} onPress={handleStart} disabled={starting} activeOpacity={0.85}>
@@ -549,7 +590,7 @@ export default function WorkoutScreen() {
               <Text style={[sr.num, styles.colHeader]}>SET</Text>
               <Text style={[sr.prev, styles.colHeader]}>PREV</Text>
               <Text style={[sr.input, styles.colHeader]}>KG</Text>
-              <Text style={[sr.input, styles.colHeader]}>REPS</Text>
+              <Text style={[sr.input, styles.colHeader]}>{REP_UNIT_LABEL[block.repUnit] ?? 'REPS'}</Text>
               <View style={sr.check} />
             </View>
             {block.sets.map((set, i) => (

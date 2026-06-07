@@ -87,6 +87,13 @@ wger-app/
 | Session logs | GET | `/api/v2/workoutlog/?workout=<id>&limit=100` |
 | Log a set | POST | `/api/v2/workoutlog/` |
 | Create session | POST | `/api/v2/workoutsession/` |
+| Sets config | GET | `/api/v2/sets-config/?limit=100` |
+| Reps config | GET | `/api/v2/repetitions-config/?limit=100` |
+| Weight config | GET | `/api/v2/weight-config/?limit=100` |
+
+**API docs:** https://wger.readthedocs.io/en/latest/api/routines.html
+
+**Important:** The `/api/v2/day/`, `/api/v2/sets-config/`, `/api/v2/repetitions-config/`, and `/api/v2/weight-config/` endpoints **ignore all query filter parameters**. Always fetch all records and filter client-side.
 
 ## wger data model
 
