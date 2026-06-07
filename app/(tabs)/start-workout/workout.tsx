@@ -1,8 +1,7 @@
 import { MaterialIcons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import Swipeable from 'react-native-gesture-handler/Swipeable';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -10,6 +9,7 @@ import {
   FlatList,
   KeyboardAvoidingView,
   Modal,
+  PanResponder,
   Platform,
   ScrollView,
   StyleSheet,
@@ -122,6 +122,32 @@ function RestTimerBar({ startedAt, totalSeconds, onFinish }: {
         <Text style={rt.label}>{m}:{String(sec).padStart(2, '0')}</Text>
       </View>
     </TouchableOpacity>
+  );
+}
+
+// ── Swipeable Row ─────────────────────────────────────────────────────────────
+
+function SwipeableRow({ children, onDelete }: { children: React.ReactNode; onDelete: () => void }) {
+  const translateX = useRef(new Animated.Value(0)).current;
+
+  const pan = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) => g.dx < -5 && Math.abs(g.dx) > Math.abs(g.dy),
+      onPanResponderMove: (_, g) => { if (g.dx < 0) translateX.setValue(g.dx); },
+      onPanResponderRelease: (_, g) => {
+        if (g.dx < -80 || g.vx < -1) {
+          Animated.timing(translateX, { toValue: -500, duration: 200, useNativeDriver: true }).start(onDelete);
+        } else {
+          Animated.spring(translateX, { toValue: 0, useNativeDriver: true }).start();
+        }
+      },
+    })
+  ).current;
+
+  return (
+    <Animated.View style={{ transform: [{ translateX }] }} {...pan.panHandlers}>
+      {children}
+    </Animated.View>
   );
 }
 
@@ -606,17 +632,9 @@ export default function WorkoutScreen() {
             </View>
             {block.sets.map((set, i) => (
               <View key={set.id}>
-                <Swipeable
-                  renderRightActions={() => (
-                    <TouchableOpacity style={sr.deleteAction} onPress={() => handleDeleteSet(set.id!)}>
-                      <MaterialIcons name="delete" size={20} color="#fff" />
-                    </TouchableOpacity>
-                  )}
-                  friction={2}
-                  overshootRight={false}
-                >
+                <SwipeableRow onDelete={() => handleDeleteSet(set.id!)}>
                   <SetRow set={set} index={i} onUpdate={handleUpdateSet} onDelete={handleDeleteSet} />
-                </Swipeable>
+                </SwipeableRow>
                 {restTimer?.setId === set.id && (
                   <RestTimerBar startedAt={restTimer.startedAt} totalSeconds={restTimer.totalSeconds} onFinish={() => setRestTimer(null)} />
                 )}
@@ -667,7 +685,6 @@ const sr = StyleSheet.create({
   inputDone: { backgroundColor: '#1a2a3a', color: '#2196F3' },
   check: { width: 32, height: 32, borderRadius: 6, borderWidth: 2, borderColor: '#444', justifyContent: 'center', alignItems: 'center', marginHorizontal: 2 },
   checkDone: { backgroundColor: '#2196F3', borderColor: '#2196F3' },
-  deleteAction: { backgroundColor: '#f44336', justifyContent: 'center', alignItems: 'center', width: 60, borderRadius: 6, marginLeft: 6, marginVertical: 2 },
 });
 
 const styles = StyleSheet.create({
